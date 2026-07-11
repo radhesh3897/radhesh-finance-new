@@ -63,6 +63,10 @@ export default function Home() {
 
   const nav = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
+  const [authenticated, setAuthenticated] = useState(false);
+
+  if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -114,6 +118,20 @@ function InsightModal({ transactions, totals, onClose }: { transactions: Transac
   const savingsRate = totals.income > 0 ? Math.round(((totals.income - totals.expense) / totals.income) * 100) : 0;
   const coverage = totals.expense > 0 ? (totals.income / totals.expense).toFixed(1) : "0.0";
   return <div className="modal-backdrop" onClick={onClose}><div className="modal insights-modal" onClick={(event) => event.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PERSONAL MONEY REVIEW · INR</p><h2>Your spending insights</h2></div><button onClick={onClose}>×</button></div><p className="insights-intro">A quick read of the transactions currently in your Pocketwise ledger.</p><div className="insight-grid"><div className="insight-card insight-card-orange"><span className="insight-card-icon">↘</span><small>Top spend category</small><strong>{topCategory[0]}</strong><b>{money(Number(topCategory[1]))}</b><p>Keep an eye on this category this month.</p></div><div className="insight-card insight-card-green"><span className="insight-card-icon">✦</span><small>Savings rate</small><strong>{savingsRate}%</strong><b>{money(Math.max(0, totals.income - totals.expense))} saved</b><p>Based on income minus expenses.</p></div><div className="insight-card insight-card-blue"><span className="insight-card-icon">↗</span><small>Income coverage</small><strong>{coverage}×</strong><b>your expenses</b><p>Every rupee in is covering your outflow.</p></div></div><div className="insight-footer"><span>Reviewed {transactions.length} transactions</span><button className="secondary-action" onClick={onClose}>Close insights</button></div></div></div>;
+}
+
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [email, setEmail] = useState("demo@pocketwise.in");
+  const [password, setPassword] = useState("Pocketwise123");
+  const [error, setError] = useState("");
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (email.trim().toLowerCase() === "demo@pocketwise.in" && password === "Pocketwise123") onLogin();
+    else setError("Use the demo credentials shown below to continue.");
+  }
+
+  return <main className="login-shell"><section className="login-visual"><div className="login-brand"><span className="brand-mark">₹</span><span>pocketwise</span></div><div className="login-visual-copy"><p className="eyebrow">YOUR MONEY · YOUR CLARITY</p><h1>A calmer way to see where your money goes.</h1><p>Track income, expenses, budgets, and the small choices that add up.</p></div><div className="login-preview"><div className="preview-top"><span>Net balance</span><b>₹13,23,135</b></div><div className="preview-bars"><i/><i/><i/><i/><i/><i/><i/><i/></div><div className="preview-bottom"><span>Income</span><strong>₹66,200</strong><span>Expenses</span><strong className="preview-expense">₹27,111</strong></div></div></section><section className="login-panel"><div className="login-card"><div className="login-card-head"><p className="eyebrow">WELCOME BACK</p><h2>Sign in to Pocketwise</h2><p>Keep your personal finance picture close.</p></div><form onSubmit={submit} className="login-form"><label>Email address<input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setError(""); }} autoComplete="email" required /></label><label>Password<div className="password-wrap"><input type="password" value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} autoComplete="current-password" required /><span>•••</span></div></label>{error && <p className="login-error">{error}</p>}<button className="primary login-submit" type="submit">Sign in <span>→</span></button></form><div className="demo-credentials"><div><span>DEMO ACCOUNT</span><strong>Ready to explore</strong></div><div className="credential-row"><span>Email</span><b>demo@pocketwise.in</b></div><div className="credential-row"><span>Password</span><b>Pocketwise123</b></div></div><p className="login-footnote">Demo access only · Authentication is temporary for this prototype.</p></div></section></main>;
 }
 
 function TransactionRow({ transaction: t }: { transaction: Transaction }) { return <div className="transaction"><div className={`transaction-icon ${t.color}`}>{t.icon}</div><div className="transaction-info"><strong>{t.name}</strong><span>{t.category} <b>•</b> {t.date}</span></div><strong className={`amount ${t.type}`}>{t.type === "income" ? "+" : "−"}{money(t.amount)}</strong><button className="row-more">...</button></div>; }
