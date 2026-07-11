@@ -8,10 +8,11 @@ import {
   useSpring,
   useTransform,
 } from "motion/react";
+import type { Variants } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
 import { useEffect } from "react";
 
-const gridVariants = {
+const gridVariants: Variants = {
   hidden: { opacity: 1 },
   visible: {
     opacity: 1,
@@ -19,7 +20,7 @@ const gridVariants = {
   },
 };
 
-const cardVariants = {
+const cardVariants: Variants = {
   hidden: { opacity: 0, y: 12 },
   visible: {
     opacity: 1,

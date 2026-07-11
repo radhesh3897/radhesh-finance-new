@@ -65,11 +65,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!authenticated || !supabase) return;
+    const client = supabase as NonNullable<typeof supabase>;
     let cancelled = false;
     async function loadSavedData() {
       const [transactionResult, categoryResult] = await Promise.all([
-        supabase.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
-        supabase.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
+        client.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
+        client.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
       ]);
       if (cancelled) return;
       if (transactionResult.error || categoryResult.error) {
@@ -86,9 +87,10 @@ export default function Home() {
 
   const reloadSavedData = async () => {
     if (!supabase) return;
+    const client = supabase as NonNullable<typeof supabase>;
     const [transactionResult, categoryResult] = await Promise.all([
-      supabase.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
-      supabase.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
+      client.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
+      client.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
     ]);
     if (transactionResult.error || categoryResult.error) return;
     setTransactions((transactionResult.data || []).map((row) => ({ id: row.id, name: row.name, category: row.category, date: row.date, month: row.month || "2025-06", amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
@@ -304,7 +306,7 @@ export default function Home() {
   );
 }
 
-function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="hero-row"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="subhead">{description}</p></div>{action}</div>; }
+function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: React.ReactNode; description: string; action?: React.ReactNode }) { return <div className="hero-row"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="subhead">{description}</p></div>{action}</div>; }
 
 function MonthSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) { return <label className="month-select"><span>Month</span><select value={value} onChange={(event) => onChange(event.target.value)} aria-label="Choose month">{MONTHS.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}</select></label>; }
 
@@ -390,6 +392,23 @@ function Transactions({ transactions, selectedMonth, setSelectedMonth, onAdd, on
         <div className="transaction-table"><div className="table-row table-header"><span>Transaction</span><span>Category</span><span>Client / source</span><span>Date</span><span>Expenses</span><span>Income</span><span>Action</span></div><AnimatedList>{filtered.map((t) => <AnimatedListItem className="table-row" key={transactionIdentity(t)}><span className="table-name"><strong>{t.name}</strong></span><span>{t.category}</span><span>{t.source || "—"}</span><span>{t.date}</span><span className="table-number expense-cell">{t.type === "expense" ? money(t.amount) : "—"}</span><span className="table-number income-cell">{t.type === "income" ? money(t.amount) : "—"}</span><button className="edit-button" onClick={() => onEdit(t)} aria-label={`Edit ${t.name}`}>Edit</button></AnimatedListItem>)}</AnimatedList></div>
       </AnimatedCard>
       <AnimatedCard className="ledger-note" standalone><span>i</span><div><strong>Showing {MONTHS.find((month) => month.value === selectedMonth)?.label}</strong><p>Income rows retain the client or source that paid you.</p></div></AnimatedCard>
+    </>
+  );
+}
+
+function Mail({ messages, status, selectedMonth, setSelectedMonth, onSync }: { messages: GmailMessage[]; status: string; selectedMonth: string; setSelectedMonth: (value: string) => void; onSync: () => void }) {
+  const visibleMessages = messages.filter((message) => {
+    const date = new Date(message.received_at);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}` === selectedMonth;
+  });
+
+  return (
+    <>
+      <PageHeading eyebrow="MAIL REVIEW" title="Imported Kotak emails" description="Every matched bank alert is saved here before it becomes part of your ledger." action={<div className="heading-actions"><MonthSelect value={selectedMonth} onChange={setSelectedMonth} /><button className="primary" onClick={onSync}>Check sync</button></div>} />
+      <AnimatedCard className="panel transactions-panel" standalone>
+        <div className="panel-head"><div><h2>Email activity</h2><p>{status === "ready" ? `${visibleMessages.length} emails in the selected month` : "Waiting for your first Apps Script sync"}</p></div></div>
+        {visibleMessages.length ? <AnimatedList>{visibleMessages.map((message) => <AnimatedListItem className="transaction" key={message.id}><div className="transaction-info"><strong>{message.subject || message.merchant || "Kotak transaction"}</strong><span>{message.from_address} · {new Date(message.received_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span></div><strong className={`amount ${message.transaction_type || "expense"}`}>{message.amount ? `${message.transaction_type === "income" ? "+" : "−"}${money(message.amount)}` : "Needs review"}</strong></AnimatedListItem>)}</AnimatedList> : <p className="empty-report">No Kotak emails have been imported for this month yet. Run the Apps Script once after deployment to bring them in.</p>}
+      </AnimatedCard>
     </>
   );
 }
