@@ -69,6 +69,8 @@ export default function Home() {
         <nav>
           <p className="nav-label">Workspace</p>
           {(["Overview", "Transactions", "Budgets", "Reports"] as View[]).map((item) => <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => nav(item)}><span>{item === "Overview" ? "O" : item === "Transactions" ? "↕" : item === "Budgets" ? "B" : "R"}</span> {item}{item === "Budgets" && <em>3</em>}</button>)}
+          <p className="nav-label second">Money flow</p>
+          <div className="money-flow"><button className="flow-item income-flow" onClick={() => { nav("Transactions"); notify("Showing income transactions"); }}><span className="flow-icon">↗</span><span><strong>Income</strong><small>{money(totals.income)} this month</small></span><b>→</b></button><button className="flow-item expense-flow" onClick={() => { nav("Transactions"); notify("Showing expense transactions"); }}><span className="flow-icon">↘</span><span><strong>Expenses</strong><small>{money(totals.expense)} this month</small></span><b>→</b></button></div>
           <p className="nav-label second">Manage</p>
           <button className={`nav-item ${view === "Connections" ? "active" : ""}`} onClick={() => setShowConnect(true)}><span>~</span> Connections</button>
           <button className={`nav-item ${view === "Settings" ? "active" : ""}`} onClick={() => nav("Settings")}><span>⚙</span> Settings</button>
