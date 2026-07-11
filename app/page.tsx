@@ -73,6 +73,24 @@ export default function Home() {
 
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 2400); };
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gmailStatus = params.get("gmail");
+    if (gmailStatus === "connected") notify(`Gmail connected${params.get("email") ? ` · ${params.get("email")}` : ""}`);
+    if (gmailStatus === "not-configured") notify("Add the Google OAuth values to the local environment first");
+    if (gmailStatus === "authorization-failed" || gmailStatus === "connection-error") notify("Gmail connection was not completed");
+    if (gmailStatus) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
+  const startGmailConnection = () => { window.location.href = "/api/gmail/start"; };
+
+  async function syncGmail() {
+    const response = await fetch("/api/gmail/sync");
+    const result = await response.json();
+    if (!response.ok) { notify(result.message || "Connect Gmail first"); return; }
+    notify(`Found ${result.count} Kotak email${result.count === 1 ? "" : "s"} ready to review`);
+  }
+
   async function addTransaction(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -161,7 +179,7 @@ export default function Home() {
            {view === "Transactions" && <Transactions transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onEdit={openEditTransaction} />}
           {view === "Reports" && <Reports transactions={visibleTransactions} totals={totals} monthLabel={MONTHS.find((month) => month.value === selectedMonth)?.label || selectedMonth} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "Settings" && <Settings categories={categories} onAddCategory={addCategory} notify={notify} />}
-          {view === "Connections" && <Connections onConnect={() => { setShowConnect(true); notify(storageStatus); }} />}
+          {view === "Connections" && <Connections onConnect={() => { setShowConnect(true); notify(storageStatus); }} onSync={syncGmail} />}
           </AnimatedView>
         </div>
       </section>
@@ -177,7 +195,7 @@ export default function Home() {
         </form>
       </AnimatedModal>
       <AnimatedModal open={showConnect} onClose={() => setShowConnect(false)} className="modal connect-modal">
-        <div className="connect-art">@</div><div className="modal-head"><div><p className="eyebrow">AUTOMATIC IMPORTS</p><h2>Connect your inbox</h2></div><button onClick={() => setShowConnect(false)}>×</button></div><p className="modal-copy">Pocketwise can scan receipts, invoices, and payout emails to help keep your INR ledger up to date. Your inbox stays private and you choose what gets added.</p><button className="email-connect" onClick={() => { setShowConnect(false); notify("Email connection request saved") }}><span>G</span> Connect with Gmail <b>→</b></button><button className="secondary" onClick={() => setShowConnect(false)}>I'll do this later</button>
+        <div className="connect-art">@</div><div className="modal-head"><div><p className="eyebrow">AUTOMATIC IMPORTS</p><h2>Connect your inbox</h2></div><button onClick={() => setShowConnect(false)}>×</button></div><p className="modal-copy">Finance Dashboard will ask Google for read-only access to the Gmail account where Kotak sends transaction emails.</p><button className="email-connect" onClick={startGmailConnection}><span>G</span> Connect with Gmail <b>→</b></button><button className="secondary" onClick={() => setShowConnect(false)}>I'll do this later</button>
       </AnimatedModal>
       <InsightModal open={showInsights} transactions={visibleTransactions} totals={totals} onClose={() => setShowInsights(false)} />
       {toast && <div className="toast">✓ &nbsp;{toast}</div>}
@@ -304,4 +322,15 @@ function Reports({ transactions, totals, monthLabel, selectedMonth, setSelectedM
 
 function Settings({ categories, onAddCategory, notify }: { categories: typeof baseCategories; onAddCategory: (event: React.FormEvent<HTMLFormElement>) => void; notify: (message: string) => void }) { return <><PageHeading eyebrow="PREFERENCES" title="Settings" description="Make Pocketwise feel like your money system." /><div className="settings-grid"><div className="panel settings-card"><div className="panel-head"><div><h2>Currency & locale</h2><p>Used across your dashboard and reports</p></div><span className="settings-check">✓</span></div><label>Currency<select defaultValue="INR"><option value="INR">INR · Indian Rupee (₹)</option></select></label><label>Number format<select defaultValue="en-IN"><option value="en-IN">India · 1,23,456.78</option></select></label><button className="secondary-action" onClick={() => notify("Indian rupee format saved")}>Save preferences</button></div><div className="panel settings-card"><div className="panel-head"><div><h2>Categories</h2><p>Organise both expenses and income</p></div><span className="category-count">{categories.length}</span></div><div className="category-settings-list">{categories.map((c) => <div key={c.name}><span><i className={`budget-dot ${c.color}`} />{c.name}</span><small>{c.kind === "income" ? "Income" : "Expense"}</small></div>)}</div><form className="category-form" onSubmit={onAddCategory}><input name="categoryName" placeholder="New category name" required /><select name="categoryKind"><option value="expense">Expense</option><option value="income">Income</option></select><button className="primary" type="submit">Add</button></form></div></div><div className="panel settings-card full-settings"><div className="panel-head"><div><h2>Email import rules</h2><p>Choose what Pocketwise should recognise from your inbox</p></div><span className="settings-check muted-check">✓</span></div><div className="rule-list"><label><input type="checkbox" defaultChecked /> Receipts and card spends</label><label><input type="checkbox" defaultChecked /> Salary and freelance credits</label><label><input type="checkbox" /> Bills and recurring payments</label></div><button className="text-button" onClick={() => notify("Import rules saved")}>Save import rules <span>→</span></button></div></>; }
 
-function Connections({ onConnect }: { onConnect: () => void }) { return <><PageHeading eyebrow="AUTOMATIC IMPORTS" title="Connections" description="Bring Kotak Mahindra transaction emails into your INR ledger." action={<button className="primary" onClick={onConnect}>Connect Gmail</button>} /><div className="connection-grid"><div className="panel connection-card connected"><div className="connection-logo">G</div><div><h2>Gmail + Kotak Mahindra</h2><p>Import transaction alerts, card spends, UPI payments, and income credits for your review.</p><span className="connected-pill">Local setup ready</span></div><button className="text-button">Manage</button></div><div className="panel connection-card"><div className="connection-logo outlook">@</div><div><h2>Email rules</h2><p>Choose which Kotak email types should become draft transactions.</p><button className="secondary-action" onClick={onConnect}>Configure rules</button></div></div></div><div className="privacy-note"><strong>Your inbox, your control.</strong><p>Gmail sync will run through a secure server connection and every imported transaction will be reviewable before it enters your ledger.</p></div></>; }
++function Connections({ onConnect, onSync }: { onConnect: () => void; onSync: () => void }) {
+  return (
+    <>
+      <PageHeading eyebrow="AUTOMATIC IMPORTS" title="Connections" description="Bring Kotak Mahindra transaction emails into your INR ledger." action={<button className="primary" onClick={onConnect}>Connect Gmail</button>} />
+      <div className="connection-grid">
+        <div className="panel connection-card connected"><div className="connection-logo">G</div><div><h2>Gmail + Kotak Mahindra</h2><p>Import transaction alerts, card spends, UPI payments, and income credits for your review.</p><span className="connected-pill">OAuth setup ready</span></div><button className="text-button" onClick={onSync}>Sync emails</button></div>
+        <div className="panel connection-card"><div className="connection-logo outlook">@</div><div><h2>Email rules</h2><p>Only Kotak-related emails will be shortlisted for review before they become transactions.</p><button className="secondary-action" onClick={onConnect}>Configure rules</button></div></div>
+      </div>
+      <div className="privacy-note"><strong>Your inbox, your control.</strong><p>Gmail access is read-only. Imported emails will be reviewable before they enter your ledger.</p></div>
+    </>
+  );
+}
