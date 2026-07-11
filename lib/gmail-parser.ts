@@ -32,8 +32,8 @@ function firstAmount(text: string) {
 }
 
 function classify(text: string): "income" | "expense" | null {
-  if (/\b(credited|credit\s+alert|cash\s+deposit|received|deposit|salary|refund|reversed)\b/i.test(text)) return "income";
-  if (/\b(debited|debit|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed|spent|purchase|paid|withdrawn|transferred)\b/i.test(text)) return "expense";
+  if (/\b(credited|credit\s+alert|upi\s+credit|cash\s+deposit|received|deposit|salary|refund|reversed)\b/i.test(text)) return "income";
+  if (/\b(debited|debit|successfully\s+made\s+a\s+upi\s+payment|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed|spent|purchase|paid|withdrawn|transferred)\b/i.test(text)) return "expense";
   return null;
 }
 
@@ -42,7 +42,7 @@ export function isKotakTransactionEmail(input: { from: string; subject: string; 
   const text = `${input.subject}\n${input.snippet || ""}\n${input.body || ""}`.toLowerCase();
   const isKotakSender = /@(\w+[.-])*kotak(?:\.bank)?\.in\b|@kotak\.com\b/.test(from);
   const hasAmount = /(?:₹|â‚¹|inr|rs\.?|rupees)\s*[0-9][0-9,]*(?:\.\d{1,2})?/i.test(text);
-  const hasTransactionSignal = /\b(debited|credited|credit\s+alert|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed)\b/i.test(text);
+  const hasTransactionSignal = /\b(debited|credited|credit\s+alert|upi\s+credit|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed)\b/i.test(text);
   const isNonTransaction = /\b(new\s+bill|bill\s+generated|amount\s+due|credit\s+card\s+bill|statement|registration\s+successful|upi\s+pin|scheduled\s+maintenance|reward\s+points|failed\s+attempt|important\s+update)\b/i.test(text);
   return isKotakSender && hasAmount && hasTransactionSignal && !isNonTransaction;
 }
@@ -59,6 +59,10 @@ function categoryFor(text: string, type: "income" | "expense" | null) {
 }
 
 function merchantFor(subject: string, text: string, type: "income" | "expense" | null) {
+  const upiRecipient = text.match(/\btowards\s+(.+?)\s+(?:through|via)\s+(?:the\s+)?kotak811\s+app\b/i);
+  if (upiRecipient?.[1]) return upiRecipient[1].replace(/\s+/g, " ").trim().slice(0, 120);
+  const upiSender = text.match(/\bsender\s*:\s*(.+?)\s+(?:upi\s+reference|upi\s+id|reference\s+number)\b/i);
+  if (upiSender?.[1]) return upiSender[1].replace(/\s+/g, " ").trim().slice(0, 120);
   const cleanedSubject = subject.replace(/^(re:|fwd?:)\s*/gi, "").replace(/kotak\s*mahindra\s*(bank)?/gi, "").trim();
   if (cleanedSubject) return cleanedSubject.slice(0, 120);
   if (type === "income") return "Bank credit";
