@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pocketwise — Personal finance, made clear",
-  description: "A calm, modern dashboard for understanding your money.",
+  title: "Finance Dashboard — Personal finance, made clear",
+  description: "A calm, modern dashboard for tracking Indian income, expenses, clients, and insights.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

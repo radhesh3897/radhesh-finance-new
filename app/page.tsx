@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
 
 type View = "Overview" | "Transactions" | "Reports" | "Connections" | "Settings";
 type Transaction = { name: string; category: string; date: string; amount: number; type: "income" | "expense"; icon: string; color: string; source?: string };
@@ -34,15 +35,38 @@ export default function Home() {
   const [showInsights, setShowInsights] = useState(false);
   const [toast, setToast] = useState("");
   const [period, setPeriod] = useState("This month");
+  const [storageStatus, setStorageStatus] = useState("Local demo data");
+  const [authenticated, setAuthenticated] = useState(false);
 
   const totals = useMemo(() => ({
     income: transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),
     expense: transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0),
   }), [transactions]);
 
+  useEffect(() => {
+    if (!authenticated || !supabase) return;
+    let cancelled = false;
+    async function loadSavedData() {
+      const [transactionResult, categoryResult] = await Promise.all([
+        supabase.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
+        supabase.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
+      ]);
+      if (cancelled) return;
+      if (transactionResult.error || categoryResult.error) {
+        setStorageStatus("Supabase connected · schema pending");
+        return;
+      }
+      if (transactionResult.data?.length) setTransactions(transactionResult.data.map((row) => ({ name: row.name, category: row.category, date: row.date, amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
+      if (categoryResult.data?.length) setCategories(categoryResult.data.map((row) => ({ name: row.name, kind: row.kind, color: row.color, spend: 0, income: 0 })));
+      setStorageStatus("Supabase connected");
+    }
+    loadSavedData();
+    return () => { cancelled = true; };
+  }, [authenticated]);
+
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 2400); };
 
-  function addTransaction(e: React.FormEvent<HTMLFormElement>) {
+  async function addTransaction(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const amount = Number(form.get("amount"));
@@ -51,20 +75,28 @@ export default function Home() {
     const source = String(form.get("source") || "");
     setTransactions([{ name: String(form.get("name") || "New transaction"), category, date: "Just now", amount, type, source: type === "income" ? source : undefined, icon: type === "income" ? "+" : "*", color: type === "income" ? "mint" : "peach" }, ...transactions]);
     setShowModal(false);
-    notify(`${type === "income" ? "Income" : "Expense"} added in INR`);
+    if (supabase) {
+      const { error } = await supabase.from("transactions").insert({ owner_key: "demo", name: String(form.get("name") || "New transaction"), category, date: "Just now", amount, type, source: type === "income" ? source || null : null, icon: type === "income" ? "+" : "*", color: type === "income" ? "mint" : "peach" });
+      if (error) { setStorageStatus("Supabase connected · schema pending"); notify("Added locally · run the Supabase schema to save permanently"); return; }
+      setStorageStatus("Supabase connected");
+    }
+    notify(`${type === "income" ? "Income" : "Expense"} saved in INR`);
   }
 
-  function addCategory(e: React.FormEvent<HTMLFormElement>) {
+  async function addCategory(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setCategories([...categories, { name: String(form.get("categoryName")), kind: String(form.get("categoryKind")), color: "teal", spend: 0, income: 0 }]);
     e.currentTarget.reset();
-    notify("Category added");
+    if (supabase) {
+      const { error } = await supabase.from("categories").insert({ owner_key: "demo", name: String(form.get("categoryName")), kind: String(form.get("categoryKind")), color: "teal" });
+      if (error) { setStorageStatus("Supabase connected · schema pending"); notify("Added locally · run the Supabase schema to save permanently"); return; }
+      setStorageStatus("Supabase connected");
+    }
+    notify("Category saved");
   }
 
   const nav = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-
-  const [authenticated, setAuthenticated] = useState(false);
 
   if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
 
@@ -91,7 +123,7 @@ export default function Home() {
           {view === "Transactions" && <Transactions transactions={transactions} onAdd={() => setShowModal(true)} />}
           {view === "Reports" && <Reports transactions={transactions} totals={totals} />}
           {view === "Settings" && <Settings categories={categories} onAddCategory={addCategory} notify={notify} />}
-          {view === "Connections" && <Connections onConnect={() => setShowConnect(true)} />}
+          {view === "Connections" && <Connections onConnect={() => { setShowConnect(true); notify(storageStatus); }} />}
         </div>
       </section>
 
