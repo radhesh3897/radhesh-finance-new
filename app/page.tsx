@@ -74,6 +74,10 @@ export default function Home() {
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 2400); };
 
   useEffect(() => {
+    if (window.localStorage.getItem("finance_dashboard_authenticated") === "true") setAuthenticated(true);
+  }, []);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const gmailStatus = params.get("gmail");
     if (gmailStatus === "connected") notify(`Gmail connected${params.get("email") ? ` · ${params.get("email")}` : ""}`);
@@ -153,7 +157,7 @@ export default function Home() {
 
   const nav = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
-  if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+  if (!authenticated) return <LoginScreen onLogin={() => { window.localStorage.setItem("finance_dashboard_authenticated", "true"); setAuthenticated(true); }} />;
 
   return (
     <main className="app-shell">
