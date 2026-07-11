@@ -34,3 +34,5 @@ body{font-size:16px;line-height:1.5}
 .modal label{font-size:13px}.modal input,.modal select{font-size:13px}.modal-copy{font-size:13px}.email-connect{font-size:13px}.secondary{font-size:13px}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #4c9976;outline-offset:3px}
 .subhead,.panel-head p,.transaction-info span,.monthly-report-banner p,.ledger-note p,.privacy-note p,.connection-card p,.review-item p,.export-panel p{color:#65736c}.table-row{color:#5e6d65}.text-button{color:#2e7356}.stat-foot span,.positive span,.negative span{color:#65736c}.dark-card .positive span{color:#b1c7bb}
+.edit-button{color:#2e7356;font-size:13px;font-weight:500;padding:5px 0;text-decoration:underline;text-underline-offset:3px}.row-edit{margin-left:auto}.table-row{grid-template-columns:1.7fr 1fr 1.2fr 1.2fr 1fr 1fr .7fr}
+@media(max-width:700px){.transaction-table{min-width:940px}.table-row{grid-template-columns:1.7fr 1fr 1.2fr 1.2fr 1fr 1fr .7fr}}
