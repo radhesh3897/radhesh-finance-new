@@ -17,6 +17,7 @@ create table if not exists public.transactions (
 );
 
 alter table public.transactions add column if not exists month text not null default '2025-06';
+alter table public.transactions add column if not exists source_email_id uuid;
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
@@ -65,3 +66,29 @@ create table if not exists public.gmail_connections (
 alter table public.gmail_connections enable row level security;
 revoke all on public.gmail_connections from anon, authenticated;
 grant select, insert, update on public.gmail_connections to service_role;
+
+-- Read-only Gmail message ledger. The service role writes this table during sync;
+-- the browser reads it through /api/gmail/messages so tokens and mail bodies stay server-side.
+create table if not exists public.gmail_messages (
+  id uuid primary key default gen_random_uuid(),
+  owner_key text not null default 'demo',
+  gmail_message_id text not null,
+  gmail_thread_id text,
+  gmail_address text not null,
+  from_address text not null default '',
+  subject text not null default '',
+  snippet text not null default '',
+  received_at timestamptz not null,
+  amount numeric(14, 2),
+  transaction_type text check (transaction_type in ('income', 'expense')),
+  merchant text,
+  category text,
+  imported_transaction_id uuid references public.transactions(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_key, gmail_message_id)
+);
+
+alter table public.gmail_messages enable row level security;
+revoke all on public.gmail_messages from anon, authenticated;
+grant select, insert, update on public.gmail_messages to service_role;

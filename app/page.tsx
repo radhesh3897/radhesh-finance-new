@@ -4,11 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { AnimatedCard, AnimatedGrid, AnimatedList, AnimatedListItem, AnimatedModal, AnimatedView, CountUp } from "../components/motion";
 
-type View = "Overview" | "Transactions" | "Reports" | "Connections" | "Settings";
+type View = "Overview" | "Transactions" | "Reports" | "Mail" | "Connections" | "Settings";
 type Transaction = { id?: string; name: string; category: string; date: string; month: string; amount: number; type: "income" | "expense"; icon: string; color: string; source?: string };
-type GmailConnection = { connected: boolean; email: string | null; updatedAt: string | null; status: string };
+type GmailConnection = { connected: boolean; email: string | null; updatedAt: string | null; status: string; mode?: "oauth" | "apps-script" | null };
+type GmailMessage = { id: string; gmail_address: string; from_address: string; subject: string; snippet: string; received_at: string; amount: number | null; transaction_type: "income" | "expense" | null; merchant: string | null; category: string | null; imported_transaction_id: string | null };
 
-const MONTHS = [{ value: "2025-06", label: "June 2025" }, { value: "2025-05", label: "May 2025" }, { value: "2025-04", label: "April 2025" }];
+const MONTHS = Array.from({ length: 12 }, (_, index) => {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - index);
+  return {
+    value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+    label: date.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+  };
+});
 
 const initialTransactions: Transaction[] = [
   { name: "Freelance payout", category: "Freelance", date: "Jun 14", month: "2025-06", amount: 48200, type: "income", source: "Acme Labs", icon: "+", color: "mint" },
@@ -38,13 +47,15 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showConnect, setShowConnect] = useState(false);
-  const [gmailConnection, setGmailConnection] = useState<GmailConnection>({ connected: false, email: null, updatedAt: null, status: "not-connected" });
+  const [gmailConnection, setGmailConnection] = useState<GmailConnection>({ connected: false, email: null, updatedAt: null, status: "not-connected", mode: null });
+  const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
+  const [gmailMessagesStatus, setGmailMessagesStatus] = useState("not-loaded");
   const [showInsights, setShowInsights] = useState(false);
   const [toast, setToast] = useState("");
   const [period, setPeriod] = useState("This month");
   const [storageStatus, setStorageStatus] = useState("Local demo data");
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState("2025-06");
+  const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
 
   const visibleTransactions = useMemo(() => transactions.filter((transaction) => transaction.month === selectedMonth), [transactions, selectedMonth]);
   const totals = useMemo(() => ({
@@ -73,24 +84,66 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [authenticated]);
 
+  const reloadSavedData = async () => {
+    if (!supabase) return;
+    const [transactionResult, categoryResult] = await Promise.all([
+      supabase.from("transactions").select("*").eq("owner_key", "demo").order("created_at", { ascending: false }),
+      supabase.from("categories").select("*").eq("owner_key", "demo").order("created_at", { ascending: true }),
+    ]);
+    if (transactionResult.error || categoryResult.error) return;
+    setTransactions((transactionResult.data || []).map((row) => ({ id: row.id, name: row.name, category: row.category, date: row.date, month: row.month || "2025-06", amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
+    if (categoryResult.data?.length) setCategories(categoryResult.data.map((row) => ({ name: row.name, kind: row.kind, color: row.color, spend: 0, income: 0 })));
+  };
+
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 2400); };
 
   const loadGmailStatus = async () => {
     try {
       const response = await fetch("/api/gmail/status", { cache: "no-store" });
       const result = await response.json();
-      setGmailConnection({ connected: Boolean(result.connected), email: result.email || null, updatedAt: result.updatedAt || null, status: result.status || "not-connected" });
+      setGmailConnection({ connected: Boolean(result.connected), email: result.email || null, updatedAt: result.updatedAt || null, status: result.status || "not-connected", mode: result.mode || null });
     } catch {
       setGmailConnection((current) => ({ ...current, status: "unavailable" }));
+    }
+  };
+
+  const loadGmailMessages = async () => {
+    try {
+      const response = await fetch("/api/gmail/messages", { cache: "no-store" });
+      const result = await response.json();
+      setGmailMessages(result.messages || []);
+      setGmailMessagesStatus(result.status || "unavailable");
+    } catch {
+      setGmailMessagesStatus("unavailable");
     }
   };
 
   useEffect(() => {
     if (!authenticated) return;
     loadGmailStatus();
+    loadGmailMessages();
     const interval = window.setInterval(loadGmailStatus, 30000);
     return () => window.clearInterval(interval);
   }, [authenticated]);
+
+  async function syncGmailInBackground() {
+    if (!gmailConnection.connected || gmailConnection.mode !== "oauth") return;
+    try {
+      const response = await fetch("/api/gmail/sync", { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      await loadGmailMessages();
+      if (result.importedCount) await reloadSavedData();
+    } catch {
+      // Background checks stay quiet; the Connections screen remains available for manual retry.
+    }
+  }
+
+  useEffect(() => {
+    if (!authenticated || !gmailConnection.connected || gmailConnection.mode !== "oauth") return;
+    const interval = window.setInterval(() => { void syncGmailInBackground(); }, 15 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [authenticated, gmailConnection.connected, gmailConnection.mode]);
 
   useEffect(() => {
     if (window.localStorage.getItem("finance_dashboard_authenticated") === "true") setAuthenticated(true);
@@ -99,20 +152,36 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const gmailStatus = params.get("gmail");
+    const gmailDetail = params.get("detail");
     if (gmailStatus === "connected") notify(`Gmail connected${params.get("email") ? ` · ${params.get("email")}` : ""}`);
     if (gmailStatus === "not-configured") notify("Add the Google OAuth values to the local environment first");
-    if (gmailStatus === "authorization-failed" || gmailStatus === "connection-error") notify("Gmail connection was not completed");
+    if (gmailStatus === "google-denied") notify("Google permission was not approved");
+    if (gmailStatus === "authorization-failed") notify("Gmail connection failed: session check expired. Try again from this tab");
+    if (gmailStatus === "missing-refresh-token") notify(`Google did not return a refresh token${params.get("email") ? ` for ${params.get("email")}` : ""}`);
+    if (gmailStatus === "missing-gmail-address") notify("Google connected but did not return the Gmail address");
+    if (gmailStatus === "supabase-not-configured") notify("Supabase server key is not configured");
+    if (gmailStatus === "supabase-save-failed") notify("Gmail connected, but Supabase could not save it");
+    if (gmailStatus === "token-exchange-failed") notify("Google token exchange failed. Check OAuth client secret and redirect URI");
+    if (gmailStatus === "gmail-api-disabled") notify(gmailDetail ? `Gmail API disabled: ${gmailDetail}` : "Gmail API is disabled in Google Cloud. Enable it, then reconnect");
+    if (gmailStatus === "gmail-scope-missing") notify(gmailDetail ? `Gmail scope issue: ${gmailDetail}` : "Gmail permission scope is missing. Check OAuth consent scopes");
+    if (gmailStatus === "gmail-profile-failed") notify(gmailDetail ? `Gmail profile failed: ${gmailDetail}` : "Gmail profile check failed. Confirm Gmail API is enabled");
+    if (gmailStatus === "connection-error") notify("Gmail connection failed during callback");
     if (gmailStatus) window.history.replaceState({}, "", window.location.pathname);
   }, []);
 
-  const startGmailConnection = () => { window.location.href = "/api/gmail/start"; };
-
   async function syncGmail() {
+    if (gmailConnection.mode !== "oauth") {
+      await Promise.all([loadGmailStatus(), loadGmailMessages(), reloadSavedData()]);
+      notify(gmailConnection.connected ? "Apps Script sync is active. New Kotak emails are checked every 15 minutes." : "Set up the Kotak Apps Script, then run it once to connect this inbox.");
+      return;
+    }
     const response = await fetch("/api/gmail/sync");
     const result = await response.json();
     if (!response.ok) { notify(result.message || "Connect Gmail first"); return; }
     await loadGmailStatus();
-    notify(`Found ${result.count} Kotak email${result.count === 1 ? "" : "s"} ready to review`);
+    await loadGmailMessages();
+    if (result.importedCount) await reloadSavedData();
+    notify(result.count ? `Synced ${result.count} Kotak email${result.count === 1 ? "" : "s"} · imported ${result.importedCount || 0}` : "No Kotak debit or credit emails found this month");
   }
 
   const openConnectionModal = () => { setShowConnect(true); void loadGmailStatus(); };
@@ -187,7 +256,7 @@ export default function Home() {
         <div className="brand"><span className="brand-mark">₹</span><span>pocketwise</span></div>
         <nav>
           <p className="nav-label">Workspace</p>
-          {(["Overview", "Transactions", "Reports"] as View[]).map((item) => <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => nav(item)}><span>{item === "Overview" ? "O" : item === "Transactions" ? "↕" : "R"}</span> {item}</button>)}
+          {(["Overview", "Transactions", "Reports", "Mail"] as View[]).map((item) => <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => nav(item)}><span>{item === "Overview" ? "O" : item === "Transactions" ? "↕" : item === "Reports" ? "R" : "M"}</span> {item}</button>)}
           <p className="nav-label second">Money flow</p>
           <div className="money-flow"><button className="flow-item income-flow" onClick={() => { nav("Transactions"); notify("Showing income transactions"); }}><span className="flow-icon">↗</span><span><strong>Income</strong><small>{money(totals.income)} this month</small></span><b>→</b></button><button className="flow-item expense-flow" onClick={() => { nav("Transactions"); notify("Showing expense transactions"); }}><span className="flow-icon">↘</span><span><strong>Expenses</strong><small>{money(totals.expense)} this month</small></span><b>→</b></button></div>
           <p className="nav-label second">Manage</p>
@@ -204,6 +273,7 @@ export default function Home() {
            {view === "Overview" && <Overview totals={totals} period={period} setPeriod={setPeriod} transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onNavigate={nav} onInsights={() => setShowInsights(true)} onEdit={openEditTransaction} />}
            {view === "Transactions" && <Transactions transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onEdit={openEditTransaction} />}
           {view === "Reports" && <Reports transactions={visibleTransactions} totals={totals} monthLabel={MONTHS.find((month) => month.value === selectedMonth)?.label || selectedMonth} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
+          {view === "Mail" && <Mail messages={gmailMessages} status={gmailMessagesStatus} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onSync={syncGmail} />}
           {view === "Settings" && <Settings categories={categories} onAddCategory={addCategory} notify={notify} />}
            {view === "Connections" && <Connections onConnect={openConnectionModal} onSync={syncGmail} connection={gmailConnection} />}
           </AnimatedView>
@@ -224,8 +294,8 @@ export default function Home() {
         <div className="connect-art">@</div>
         <div className="modal-head"><div><p className="eyebrow">AUTOMATIC IMPORTS</p><h2>Connect your inbox</h2></div><button onClick={() => setShowConnect(false)}>×</button></div>
         <div className={`gmail-connection-status ${gmailConnection.connected ? "is-connected" : ""}`} role="status"><span className="status-dot" />{gmailConnection.connected ? <>Connected to <strong>{gmailConnection.email}</strong></> : gmailConnection.status === "schema-pending" ? "Connection storage needs setup" : "Not connected yet"}</div>
-        <p className="modal-copy">{gmailConnection.connected ? "This dashboard is connected to the Gmail account shown above. You can sync Kotak emails whenever you want." : "Finance Dashboard will ask Google for read-only access to the Gmail account where Kotak sends transaction emails."}</p>
-        {gmailConnection.connected ? <button className="email-connect" onClick={syncGmail}><span>↻</span> Sync Gmail now <b>→</b></button> : <button className="email-connect" onClick={startGmailConnection}><span>G</span> Connect with Gmail <b>→</b></button>}
+        <p className="modal-copy">{gmailConnection.connected ? "The Gmail-side sync is active. New Kotak debit and credit emails are checked automatically every 15 minutes." : "Set up the small Google Apps Script in the Gmail account where Kotak sends transaction emails. It does not need Google Cloud OAuth."}</p>
+        <button className="email-connect" onClick={syncGmail}><span>{gmailConnection.connected ? "↻" : "G"}</span> {gmailConnection.connected ? "Check connection" : "Set up automatic import"} <b>→</b></button>
         <button className="secondary" onClick={() => setShowConnect(false)}>I'll do this later</button>
       </AnimatedModal>
       <InsightModal open={showInsights} transactions={visibleTransactions} totals={totals} onClose={() => setShowInsights(false)} />
@@ -356,9 +426,9 @@ function Settings({ categories, onAddCategory, notify }: { categories: typeof ba
 function Connections({ onConnect, onSync, connection }: { onConnect: () => void; onSync: () => void; connection: GmailConnection }) {
   return (
     <>
-      <PageHeading eyebrow="AUTOMATIC IMPORTS" title="Connections" description="Bring Kotak Mahindra transaction emails into your INR ledger." action={<button className="primary" onClick={onConnect}>Connect Gmail</button>} />
+      <PageHeading eyebrow="AUTOMATIC IMPORTS" title="Connections" description="Bring Kotak Mahindra transaction emails into your INR ledger." action={<button className="primary" onClick={onConnect}>Set up Gmail sync</button>} />
       <div className="connection-grid">
-        <div className="panel connection-card connected"><div className="connection-logo">G</div><div><h2>Gmail + Kotak Mahindra</h2><p>Import transaction alerts, card spends, UPI payments, and income credits for your review.</p><span className={`connected-pill ${connection.connected ? "is-live" : ""}`}>{connection.connected ? `Connected · ${connection.email}` : connection.status === "schema-pending" ? "Storage setup needed" : "Not connected"}</span></div><button className="text-button" onClick={onSync}>Sync emails</button></div>
+        <div className="panel connection-card connected"><div className="connection-logo">G</div><div><h2>Gmail + Kotak Mahindra</h2><p>Import transaction alerts, card spends, UPI payments, and income credits for your review.</p><span className={`connected-pill ${connection.connected ? "is-live" : ""}`}>{connection.connected ? `Connected · ${connection.email}` : connection.status === "schema-pending" ? "Storage setup needed" : "Not connected"}</span></div><button className="text-button" onClick={onSync}>{connection.connected ? "Check sync" : "Set up"}</button></div>
         <div className="panel connection-card"><div className="connection-logo outlook">@</div><div><h2>Email rules</h2><p>Only Kotak-related emails will be shortlisted for review before they become transactions.</p><button className="secondary-action" onClick={onConnect}>Configure rules</button></div></div>
       </div>
       <div className="privacy-note"><strong>Your inbox, your control.</strong><p>Gmail access is read-only. Imported emails will be reviewable before they enter your ledger.</p></div>

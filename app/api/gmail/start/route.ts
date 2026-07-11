@@ -7,7 +7,9 @@ export async function GET(request: Request) {
     const oauthClient = getGoogleOAuthClient();
     const authorizationUrl = oauthClient.generateAuthUrl({
       access_type: "offline",
-      prompt: "consent",
+      prompt: "select_account consent",
+      include_granted_scopes: false,
+      login_hint: "aradhesh2009@gmail.com",
       scope: [GMAIL_READONLY_SCOPE],
       state,
     });
