@@ -32,9 +32,19 @@ function firstAmount(text: string) {
 }
 
 function classify(text: string): "income" | "expense" | null {
-  if (/\b(credited|credit|received|deposit|salary|refund|reversed)\b/i.test(text)) return "income";
-  if (/\b(debited|debit|spent|purchase|paid|withdrawn|transferred)\b/i.test(text)) return "expense";
+  if (/\b(credited|credit\s+alert|cash\s+deposit|received|deposit|salary|refund|reversed)\b/i.test(text)) return "income";
+  if (/\b(debited|debit|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed|spent|purchase|paid|withdrawn|transferred)\b/i.test(text)) return "expense";
   return null;
+}
+
+export function isKotakTransactionEmail(input: { from: string; subject: string; snippet?: string; body?: string }) {
+  const from = input.from.toLowerCase();
+  const text = `${input.subject}\n${input.snippet || ""}\n${input.body || ""}`.toLowerCase();
+  const isKotakSender = /@(\w+[.-])*kotak(?:\.bank)?\.in\b|@kotak\.com\b/.test(from);
+  const hasAmount = /(?:₹|â‚¹|inr|rs\.?|rupees)\s*[0-9][0-9,]*(?:\.\d{1,2})?/i.test(text);
+  const hasTransactionSignal = /\b(debited|credited|credit\s+alert|payment\s+of|upi\s+payment|card\s+transaction|transaction\s+of|has\s+been\s+processed)\b/i.test(text);
+  const isNonTransaction = /\b(new\s+bill|bill\s+generated|amount\s+due|credit\s+card\s+bill|statement|registration\s+successful|upi\s+pin|scheduled\s+maintenance|reward\s+points|failed\s+attempt|important\s+update)\b/i.test(text);
+  return isKotakSender && hasAmount && hasTransactionSignal && !isNonTransaction;
 }
 
 function categoryFor(text: string, type: "income" | "expense" | null) {

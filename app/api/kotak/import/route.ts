@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { parseInboxImport } from "../../../../lib/gmail-parser";
+import { isKotakTransactionEmail, parseInboxImport } from "../../../../lib/gmail-parser";
 import { supabaseServer } from "../../../../lib/supabase-server";
 
 type InboxImport = {
@@ -49,6 +49,10 @@ export async function POST(request: Request) {
   const subject = input.subject?.trim();
   if (!gmailMessageId || !gmailAddress || !fromAddress || !subject) {
     return NextResponse.json({ error: "gmailMessageId, gmailAddress, fromAddress, and subject are required" }, { status: 400 });
+  }
+
+  if (!isKotakTransactionEmail({ from: fromAddress, subject, snippet: input.snippet, body: input.body })) {
+    return NextResponse.json({ saved: false, imported: false, ignored: true });
   }
 
   const parsed = parseInboxImport({
