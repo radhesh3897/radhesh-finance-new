@@ -240,6 +240,7 @@ export default function Home() {
   const openEditTransaction = (transaction: Transaction) => { setEditingTransaction(transaction); setShowModal(true); };
 
   const nav = (next: View, filter?: "all" | "income" | "expense") => { if (filter) setLedgerFilter(filter); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const signOut = () => { window.localStorage.removeItem("finance_dashboard_authenticated"); setAuthenticated(false); setView("Overview"); };
 
   if (!authenticated) return <LoginScreen onLogin={() => { window.localStorage.setItem("finance_dashboard_authenticated", "true"); setAuthenticated(true); }} />;
 
@@ -256,7 +257,7 @@ export default function Home() {
           <button className={`nav-item ${view === "Connections" ? "active" : ""}`} onClick={openConnectionModal}><span>~</span> Connections</button>
           <button className={`nav-item ${view === "Settings" ? "active" : ""}`} onClick={() => nav("Settings")}><span>⚙</span> Settings</button>
         </nav>
-        <div className="sidebar-bottom"><div className="sync-card"><div className="sync-icon">@</div><div><strong>{gmailConnection.connected ? "Gmail connected" : "Connect your inbox"}</strong><p>{gmailConnection.connected ? gmailConnection.email : "Find expenses automatically"}</p></div><button onClick={openConnectionModal}>→</button></div><div className="profile"><div className="avatar">RA</div><div><strong>Radhesh Agrawal</strong><span>Indian rupee workspace</span></div><span className="dots">...</span></div></div>
+        <div className="sidebar-bottom"><div className="sync-card"><div className="sync-icon">@</div><div><strong>{gmailConnection.connected ? "Gmail connected" : "Connect your inbox"}</strong><p>{gmailConnection.connected ? gmailConnection.email : "Find expenses automatically"}</p></div><button onClick={openConnectionModal}>→</button></div><div className="profile"><div className="avatar">RA</div><div><strong>Radhesh Agrawal</strong><span>Indian rupee workspace</span></div></div><button className="sign-out" onClick={signOut}>Sign out <span>→</span></button></div>
       </aside>
 
       <section className="content">
