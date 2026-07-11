@@ -36,11 +36,13 @@ drop policy if exists "demo transactions read" on public.transactions;
 drop policy if exists "demo transactions insert" on public.transactions;
 drop policy if exists "demo categories read" on public.categories;
 drop policy if exists "demo categories insert" on public.categories;
+drop policy if exists "demo transactions update" on public.transactions;
 
 create policy "demo transactions read" on public.transactions for select to anon, authenticated using (owner_key = 'demo');
 create policy "demo transactions insert" on public.transactions for insert to anon, authenticated with check (owner_key = 'demo');
 create policy "demo categories read" on public.categories for select to anon, authenticated using (owner_key = 'demo');
 create policy "demo categories insert" on public.categories for insert to anon, authenticated with check (owner_key = 'demo');
+create policy "demo transactions update" on public.transactions for update to anon, authenticated using (owner_key = 'demo') with check (owner_key = 'demo');
 
 insert into public.categories (name, kind, color)
 values

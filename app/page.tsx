@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { supabase } from "../lib/supabase";
 import { AnimatedCard, AnimatedGrid, AnimatedList, AnimatedListItem, AnimatedModal, AnimatedView, CountUp } from "../components/motion";
 
@@ -19,31 +20,20 @@ const MONTHS = Array.from({ length: 12 }, (_, index) => {
   };
 });
 
-const initialTransactions: Transaction[] = [
-  { name: "Freelance payout", category: "Freelance", date: "Jun 14", month: "2025-06", amount: 48200, type: "income", source: "Acme Labs", icon: "+", color: "mint" },
-  { name: "Nature's Basket", category: "Groceries", date: "Jun 14", month: "2025-06", amount: 8642, type: "expense", icon: "*", color: "peach" },
-  { name: "Notion", category: "Subscriptions", date: "Jun 13", month: "2025-06", amount: 850, type: "expense", icon: "N", color: "lavender" },
-  { name: "Uber India", category: "Transport", date: "Jun 13", month: "2025-06", amount: 2480, type: "expense", icon: "U", color: "sky" },
-  { name: "Amazon India", category: "Shopping", date: "Jun 08", month: "2025-06", amount: 12999, type: "expense", icon: "A", color: "rose" },
-  { name: "Consulting retainer", category: "Consulting", date: "Jun 05", month: "2025-06", amount: 18000, type: "income", source: "Arjun Mehta", icon: "+", color: "mint" },
-  { name: "Electricity bill", category: "Utilities", date: "Jun 03", month: "2025-06", amount: 2140, type: "expense", icon: "E", color: "peach" },
-];
-
-const baseCategories = [
-  { name: "Groceries", kind: "expense", color: "orange", spend: 18640, income: 0 },
-  { name: "Transport", kind: "expense", color: "blue", spend: 8240, income: 0 },
-  { name: "Subscriptions", kind: "expense", color: "purple", spend: 3150, income: 0 },
-  { name: "Freelance", kind: "income", color: "green", spend: 0, income: 48200 },
-  { name: "Other income", kind: "income", color: "teal", spend: 0, income: 18000 },
-];
+type Category = { name: string; kind: "income" | "expense"; color: string };
 
 const money = (amount: number) => amount.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 const transactionIdentity = (transaction: Transaction) => transaction.id || `${transaction.name}-${transaction.date}-${transaction.amount}-${transaction.type}`;
+const totalsFor = (items: Transaction[]) => ({ income: items.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0), expense: items.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0) });
+const shiftMonth = (month: string, offset: number) => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + offset, 1); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; };
+const transactionDateValue = (transaction: Transaction) => { if (/^\d{4}-\d{2}-\d{2}$/.test(transaction.date)) return transaction.date; const day = transaction.date.match(/\d{1,2}/)?.[0] || "1"; return `${transaction.month}-${day.padStart(2, "0")}`; };
+const displayDate = (transaction: Transaction) => new Date(`${transactionDateValue(transaction)}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+const comparison = (current: number, previous: number) => previous > 0 ? ((current - previous) / previous) * 100 : null;
 
 export default function Home() {
   const [view, setView] = useState<View>("Overview");
-  const [transactions, setTransactions] = useState(initialTransactions);
-  const [categories, setCategories] = useState(baseCategories);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showConnect, setShowConnect] = useState(false);
@@ -52,16 +42,14 @@ export default function Home() {
   const [gmailMessagesStatus, setGmailMessagesStatus] = useState("not-loaded");
   const [showInsights, setShowInsights] = useState(false);
   const [toast, setToast] = useState("");
-  const [period, setPeriod] = useState("This month");
   const [storageStatus, setStorageStatus] = useState("Local demo data");
   const [authenticated, setAuthenticated] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
+  const [ledgerFilter, setLedgerFilter] = useState<"all" | "income" | "expense">("all");
 
   const visibleTransactions = useMemo(() => transactions.filter((transaction) => transaction.month === selectedMonth), [transactions, selectedMonth]);
-  const totals = useMemo(() => ({
-    income: visibleTransactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),
-    expense: visibleTransactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0),
-  }), [visibleTransactions]);
+  const totals = useMemo(() => totalsFor(visibleTransactions), [visibleTransactions]);
+  const previousTotals = useMemo(() => totalsFor(transactions.filter((transaction) => transaction.month === shiftMonth(selectedMonth, -1))), [transactions, selectedMonth]);
 
   useEffect(() => {
     if (!authenticated || !supabase) return;
@@ -77,9 +65,9 @@ export default function Home() {
         setStorageStatus("Supabase connected · schema pending");
         return;
       }
-      if (transactionResult.data?.length) setTransactions(transactionResult.data.map((row) => ({ id: row.id, name: row.name, category: row.category, date: row.date, month: row.month || "2025-06", amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
-      if (categoryResult.data?.length) setCategories(categoryResult.data.map((row) => ({ name: row.name, kind: row.kind, color: row.color, spend: 0, income: 0 })));
-      setStorageStatus("Supabase connected");
+      setTransactions((transactionResult.data || []).map((row) => ({ id: row.id, name: row.name, category: row.category, date: row.date, month: row.month || "2025-06", amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
+      setCategories((categoryResult.data || []).map((row) => ({ name: row.name, kind: row.kind, color: row.color })));
+      setStorageStatus(transactionResult.data?.length ? "Supabase connected" : "Supabase connected · no transactions yet");
     }
     loadSavedData();
     return () => { cancelled = true; };
@@ -94,7 +82,7 @@ export default function Home() {
     ]);
     if (transactionResult.error || categoryResult.error) return;
     setTransactions((transactionResult.data || []).map((row) => ({ id: row.id, name: row.name, category: row.category, date: row.date, month: row.month || "2025-06", amount: Number(row.amount), type: row.type, source: row.source || undefined, icon: row.icon, color: row.color })));
-    if (categoryResult.data?.length) setCategories(categoryResult.data.map((row) => ({ name: row.name, kind: row.kind, color: row.color, spend: 0, income: 0 })));
+    setCategories((categoryResult.data || []).map((row) => ({ name: row.name, kind: row.kind, color: row.color })));
   };
 
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 2400); };
@@ -195,14 +183,15 @@ export default function Home() {
     const type = form.get("type") as "income" | "expense";
     const category = String(form.get("category") || "Other");
     const source = String(form.get("source") || "");
-    const month = String(form.get("month") || selectedMonth);
+    const date = String(form.get("date") || `${selectedMonth}-01`);
+    const month = date.slice(0, 7);
     const identity = editingTransaction ? transactionIdentity(editingTransaction) : null;
     const id = editingTransaction?.id || crypto.randomUUID();
     const nextTransaction: Transaction = {
       id,
       name: String(form.get("name") || "New transaction"),
       category,
-      date: editingTransaction?.date || "Just now",
+      date,
       month,
       amount,
       type,
@@ -234,7 +223,9 @@ export default function Home() {
   async function addCategory(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    setCategories([...categories, { name: String(form.get("categoryName")), kind: String(form.get("categoryKind")), color: "teal", spend: 0, income: 0 }]);
+    const category: Category = { name: String(form.get("categoryName")).trim(), kind: String(form.get("categoryKind")) as Category["kind"], color: "teal" };
+    if (!category.name || categories.some((item) => item.name.toLowerCase() === category.name.toLowerCase())) { notify("That category already exists"); return; }
+    setCategories((current) => [...current, category]);
     e.currentTarget.reset();
     if (supabase) {
       const { error } = await supabase.from("categories").insert({ owner_key: "demo", name: String(form.get("categoryName")), kind: String(form.get("categoryKind")), color: "teal" });
@@ -248,7 +239,7 @@ export default function Home() {
   const openAddTransaction = () => { setEditingTransaction(null); setShowModal(true); };
   const openEditTransaction = (transaction: Transaction) => { setEditingTransaction(transaction); setShowModal(true); };
 
-  const nav = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const nav = (next: View, filter?: "all" | "income" | "expense") => { if (filter) setLedgerFilter(filter); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   if (!authenticated) return <LoginScreen onLogin={() => { window.localStorage.setItem("finance_dashboard_authenticated", "true"); setAuthenticated(true); }} />;
 
@@ -260,7 +251,7 @@ export default function Home() {
           <p className="nav-label">Workspace</p>
           {(["Overview", "Transactions", "Reports", "Mail"] as View[]).map((item) => <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => nav(item)}><span>{item === "Overview" ? "O" : item === "Transactions" ? "↕" : item === "Reports" ? "R" : "M"}</span> {item}</button>)}
           <p className="nav-label second">Money flow</p>
-          <div className="money-flow"><button className="flow-item income-flow" onClick={() => { nav("Transactions"); notify("Showing income transactions"); }}><span className="flow-icon">↗</span><span><strong>Income</strong><small>{money(totals.income)} this month</small></span><b>→</b></button><button className="flow-item expense-flow" onClick={() => { nav("Transactions"); notify("Showing expense transactions"); }}><span className="flow-icon">↘</span><span><strong>Expenses</strong><small>{money(totals.expense)} this month</small></span><b>→</b></button></div>
+          <div className="money-flow"><button className="flow-item income-flow" onClick={() => nav("Transactions", "income")}><span className="flow-icon">↗</span><span><strong>Income</strong><small>{money(totals.income)} this month</small></span><b>→</b></button><button className="flow-item expense-flow" onClick={() => nav("Transactions", "expense")}><span className="flow-icon">↘</span><span><strong>Expenses</strong><small>{money(totals.expense)} this month</small></span><b>→</b></button></div>
           <p className="nav-label second">Manage</p>
           <button className={`nav-item ${view === "Connections" ? "active" : ""}`} onClick={openConnectionModal}><span>~</span> Connections</button>
           <button className={`nav-item ${view === "Settings" ? "active" : ""}`} onClick={() => nav("Settings")}><span>⚙</span> Settings</button>
@@ -269,14 +260,14 @@ export default function Home() {
       </aside>
 
       <section className="content">
-        <header className="topbar"><div className="mobile-brand">₹ pocketwise</div><div className="breadcrumb">Personal / <strong>{view}</strong></div><div className="top-actions"><button className="icon-button" aria-label="Search" onClick={() => notify("Search is available in Transactions")}>⌕</button><button className="icon-button" aria-label="Notifications" onClick={() => notify("No new money alerts")}>♧<i /></button><div className="mini-avatar">RA</div></div></header>
+        <header className="topbar"><div className="mobile-brand">₹ pocketwise</div><div className="breadcrumb">Personal / <strong>{view}</strong></div><div className="top-actions"><button className="icon-button" aria-label="Search transactions" onClick={() => nav("Transactions", "all")}>⌕</button><div className="mini-avatar">RA</div></div></header>
         <div className="page-wrap">
           <AnimatedView viewKey={view}>
-           {view === "Overview" && <Overview totals={totals} period={period} setPeriod={setPeriod} transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onNavigate={nav} onInsights={() => setShowInsights(true)} onEdit={openEditTransaction} />}
-           {view === "Transactions" && <Transactions transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onEdit={openEditTransaction} />}
+           {view === "Overview" && <Overview totals={totals} previousTotals={previousTotals} transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onNavigate={nav} onInsights={() => setShowInsights(true)} onEdit={openEditTransaction} />}
+           {view === "Transactions" && <Transactions transactions={visibleTransactions} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onAdd={openAddTransaction} onEdit={openEditTransaction} initialKind={ledgerFilter} />}
           {view === "Reports" && <Reports transactions={visibleTransactions} totals={totals} monthLabel={MONTHS.find((month) => month.value === selectedMonth)?.label || selectedMonth} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "Mail" && <Mail messages={gmailMessages} status={gmailMessagesStatus} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} onSync={syncGmail} />}
-          {view === "Settings" && <Settings categories={categories} onAddCategory={addCategory} notify={notify} />}
+          {view === "Settings" && <Settings categories={categories} onAddCategory={addCategory} storageStatus={storageStatus} />}
            {view === "Connections" && <Connections onConnect={openConnectionModal} onSync={syncGmail} connection={gmailConnection} />}
           </AnimatedView>
         </div>
@@ -285,10 +276,10 @@ export default function Home() {
       <AnimatedModal open={showModal} onClose={closeTransactionModal}>
         <div className="modal-head"><div><p className="eyebrow">{editingTransaction ? "EDIT TRANSACTION · INR" : "MONEY MOVE · INR"}</p><h2>{editingTransaction ? "Edit transaction" : "Add transaction"}</h2></div><button onClick={closeTransactionModal}>×</button></div>
         <form onSubmit={addTransaction}>
-          <input type="hidden" name="month" value={editingTransaction?.month || selectedMonth} readOnly />
           <label>Description<input name="name" defaultValue={editingTransaction?.name || ""} placeholder="e.g. Kotak card payment" required /></label>
-          <div className="form-row"><label>Amount in INR<input name="amount" type="number" step="0.01" defaultValue={editingTransaction?.amount || ""} placeholder="0.00" required /></label><label>Type<select name="type" defaultValue={editingTransaction?.type || "expense"}><option value="expense">Expense</option><option value="income">Income</option></select></label></div>
-          <div className="form-row"><label>Category<select name="category" defaultValue={editingTransaction?.category || categories[0]?.name}>{categories.map((category) => <option key={category.name}>{category.name}</option>)}<option>Other</option></select></label><label>Client / source<input name="source" defaultValue={editingTransaction?.source || ""} placeholder="For income only" /></label></div>
+          <div className="form-row"><label>Amount in INR<input name="amount" type="number" min="0.01" step="0.01" defaultValue={editingTransaction?.amount || ""} placeholder="0.00" required /></label><label>Date<input name="date" type="date" defaultValue={editingTransaction ? transactionDateValue(editingTransaction) : `${selectedMonth}-01`} required /></label></div>
+          <div className="form-row"><label>Type<select name="type" defaultValue={editingTransaction?.type || "expense"}><option value="expense">Expense</option><option value="income">Income</option></select></label><label>Category<input name="category" list="category-options" defaultValue={editingTransaction?.category || ""} placeholder="e.g. Transport" required /><datalist id="category-options">{categories.map((category) => <option key={category.name} value={category.name} />)}</datalist></label></div>
+          <label>Client / source<input name="source" defaultValue={editingTransaction?.source || ""} placeholder="For income only" /></label>
           <button className="primary full" type="submit">{editingTransaction ? "Save changes" : "Save transaction"}</button>
         </form>
       </AnimatedModal>
@@ -310,37 +301,27 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
 
 function MonthSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) { return <label className="month-select"><span>Month</span><select value={value} onChange={(event) => onChange(event.target.value)} aria-label="Choose month">{MONTHS.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}</select></label>; }
 
-function Overview({ totals, period, setPeriod, transactions, selectedMonth, setSelectedMonth, onAdd, onNavigate, onInsights, onEdit }: { totals: { income: number; expense: number }; period: string; setPeriod: (value: string) => void; transactions: Transaction[]; selectedMonth: string; setSelectedMonth: (value: string) => void; onAdd: () => void; onNavigate: (view: View) => void; onInsights: () => void; onEdit: (transaction: Transaction) => void }) {
-  const netBalance = 1284046 + totals.income - totals.expense;
-  return (
-    <>
-      <PageHeading
-        eyebrow="MONTHLY OVERVIEW · INDIA"
-        title={<>Good morning, Radhesh <span>✦</span></>}
-        description="Your money, clearly organised in Indian rupees."
-        action={<div className="heading-actions"><MonthSelect value={selectedMonth} onChange={setSelectedMonth} /><button className="primary" onClick={onAdd}><b>＋</b> Add transaction</button></div>}
-      />
-      <AnimatedGrid className="stats-grid">
-        <AnimatedCard className="stat-card dark-card"><div className="stat-head"><span>Net balance</span><button>...</button></div><div className="stat-value"><CountUp value={netBalance} format="currency" decimals={2} /></div><div className="stat-foot positive">↗ <strong>8.4%</strong><span>vs. last month</span></div><div className="sparkline"><i/><i/><i/><i/><i/><i/><i/><i/><i/></div></AnimatedCard>
-        <AnimatedCard className="stat-card"><div className="stat-head"><span>Income</span><div className="stat-icon green">↗</div></div><div className="stat-value"><CountUp value={totals.income} format="currency" decimals={2} /></div><div className="stat-foot positive">↗ <strong>12.8%</strong><span>vs. last month</span></div></AnimatedCard>
-        <AnimatedCard className="stat-card"><div className="stat-head"><span>Expenses</span><div className="stat-icon coral">↘</div></div><div className="stat-value"><CountUp value={totals.expense} format="currency" decimals={2} /></div><div className="stat-foot negative">↘ <strong>3.2%</strong><span>vs. last month</span></div></AnimatedCard>
-      </AnimatedGrid>
-      <AnimatedGrid className="dashboard-grid">
-        <AnimatedCard className="panel chart-panel">
-          <div className="panel-head"><div><h2>Cash flow</h2><p>Income & expenses over time</p></div><select value={period} onChange={(e) => setPeriod(e.target.value)}><option>This month</option><option>Last month</option><option>This year</option></select></div>
-          <div className="legend"><span><i className="dot income-dot"/> Income</span><span><i className="dot expense-dot"/> Expenses</span></div>
-          <div className="chart"><div className="y-labels"><span>₹60k</span><span>₹40k</span><span>₹20k</span><span>₹0</span></div><div className="chart-area"><div className="gridline one"/><div className="gridline two"/><div className="gridline three"/><div className="gridline four"/><svg viewBox="0 0 700 220" preserveAspectRatio="none" aria-label="Cash flow chart"><path className="income-line" d="M0 157 C50 135, 70 156, 112 125 S185 100, 225 137 S290 115, 335 92 S400 129, 445 89 S510 58, 555 76 S625 33, 700 46"/><path className="expense-line" d="M0 178 C45 174, 75 180, 112 169 S190 159, 225 173 S290 147, 335 153 S400 136, 445 151 S510 119, 555 131 S625 112, 700 122"/></svg><div className="chart-labels"><span>Jun 1</span><span>Jun 5</span><span>Jun 9</span><span>Jun 13</span></div></div></div>
-        </AnimatedCard>
-        <AnimatedCard className="motion-card"><CategoryInsightCard transactions={transactions} onView={() => onNavigate("Reports")} /></AnimatedCard>
-      </AnimatedGrid>
-      <AnimatedCard className="panel transactions-panel" standalone>
-        <div className="panel-head"><div><h2>Recent transactions</h2><p>Latest income and expenses</p></div><button className="text-button" onClick={() => onNavigate("Transactions")}>View all <span>→</span></button></div>
-        <div className="transactions-list"><AnimatedList>{transactions.slice(0, 5).map((t) => <AnimatedListItem key={transactionIdentity(t)}><TransactionRow transaction={t} onEdit={onEdit} /></AnimatedListItem>)}</AnimatedList></div>
-      </AnimatedCard>
-      <AnimatedCard className="insight" standalone><span className="insight-spark">✦</span><div><strong>Nice work — you&apos;re spending mindfully.</strong><p>Your dining spend is down 18% compared with last month.</p></div><button onClick={onInsights}>See insights <span>→</span></button></AnimatedCard>
-    </>
-  );
+function Overview({ totals, previousTotals, transactions, selectedMonth, setSelectedMonth, onAdd, onNavigate, onInsights, onEdit }: { totals: { income: number; expense: number }; previousTotals: { income: number; expense: number }; transactions: Transaction[]; selectedMonth: string; setSelectedMonth: (value: string) => void; onAdd: () => void; onNavigate: (view: View, filter?: "all" | "income" | "expense") => void; onInsights: () => void; onEdit: (transaction: Transaction) => void }) {
+  const netCashFlow = totals.income - totals.expense;
+  const orderedTransactions = [...transactions].sort((a, b) => transactionDateValue(b).localeCompare(transactionDateValue(a)));
+  return <>
+    <PageHeading eyebrow="MONTHLY OVERVIEW · INDIA" title={<>Good morning, Radhesh <span>✦</span></>} description="Your money, clearly organised in Indian rupees." action={<div className="heading-actions"><MonthSelect value={selectedMonth} onChange={setSelectedMonth} /><button className="primary" onClick={onAdd}><b>＋</b> Add transaction</button></div>} />
+    <AnimatedGrid className="stats-grid">
+      <AnimatedCard className="stat-card dark-card"><div className="stat-head"><span>Net cash flow</span></div><div className="stat-value"><CountUp value={netCashFlow} format="currency" decimals={2} /></div><MetricChange value={comparison(netCashFlow, previousTotals.income - previousTotals.expense)} label="vs. last month" /><div className="cash-flow-summary"><span>In {money(totals.income)}</span><span>Out {money(totals.expense)}</span></div></AnimatedCard>
+      <AnimatedCard className="stat-card"><div className="stat-head"><span>Income</span><div className="stat-icon green">↗</div></div><div className="stat-value"><CountUp value={totals.income} format="currency" decimals={2} /></div><MetricChange value={comparison(totals.income, previousTotals.income)} label="vs. last month" /></AnimatedCard>
+      <AnimatedCard className="stat-card"><div className="stat-head"><span>Expenses</span><div className="stat-icon coral">↘</div></div><div className="stat-value"><CountUp value={totals.expense} format="currency" decimals={2} /></div><MetricChange value={comparison(totals.expense, previousTotals.expense)} label="vs. last month" inverse /></AnimatedCard>
+    </AnimatedGrid>
+    <AnimatedGrid className="dashboard-grid"><AnimatedCard className="panel chart-panel"><div className="panel-head"><div><h2>Cash flow</h2><p>Income and expenses recorded during this month</p></div><span className="selected-month-note">{MONTHS.find((month) => month.value === selectedMonth)?.label}</span></div><CashFlowChart transactions={transactions} selectedMonth={selectedMonth} /></AnimatedCard><AnimatedCard className="motion-card"><CategoryInsightCard transactions={transactions} onView={() => onNavigate("Reports")} /></AnimatedCard></AnimatedGrid>
+    <AnimatedCard className="panel transactions-panel" standalone><div className="panel-head"><div><h2>Recent transactions</h2><p>Latest income and expenses</p></div><button className="text-button" onClick={() => onNavigate("Transactions", "all")}>View all <span>→</span></button></div><div className="transactions-list">{orderedTransactions.length ? <AnimatedList>{orderedTransactions.slice(0, 5).map((transaction) => <AnimatedListItem key={transactionIdentity(transaction)}><TransactionRow transaction={transaction} onEdit={onEdit} /></AnimatedListItem>)}</AnimatedList> : <p className="empty-report">No transactions recorded for this month yet.</p>}</div></AnimatedCard>
+    <InsightBanner transactions={transactions} totals={totals} onOpen={onInsights} />
+  </>;
 }
+
+function MetricChange({ value, label, inverse = false }: { value: number | null; label: string; inverse?: boolean }) { if (value === null) return <div className="stat-foot"><span>No prior-month data</span></div>; const positive = inverse ? value <= 0 : value >= 0; return <div className={`stat-foot ${positive ? "positive" : "negative"}`}><span>{value >= 0 ? "↗" : "↘"}</span><strong>{Math.abs(value).toFixed(1)}%</strong><span>{label}</span></div>; }
+
+function CashFlowChart({ transactions, selectedMonth }: { transactions: Transaction[]; selectedMonth: string }) { const reduceMotion = useReducedMotion(); const days = new Date(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0).getDate(); const values = Array.from({ length: days }, () => ({ income: 0, expense: 0 })); transactions.forEach((transaction) => { const day = Math.max(1, Math.min(days, Number(transactionDateValue(transaction).slice(-2)))); values[day - 1][transaction.type] += transaction.amount; }); let incomeRunning = 0; let expenseRunning = 0; const cumulative = values.map((value) => ({ income: incomeRunning += value.income, expense: expenseRunning += value.expense })); const maximum = Math.max(1, ...cumulative.flatMap((value) => [value.income, value.expense])); const pathFor = (key: "income" | "expense") => cumulative.map((value, index) => `${index ? "L" : "M"}${(index / Math.max(1, days - 1)) * 700} ${175 - (value[key] / maximum) * 145}`).join(" "); const labels = [1, Math.ceil(days / 3), Math.ceil((days * 2) / 3), days]; if (!transactions.length) return <div className="chart-empty">Add an income or expense to see your cash flow for this month.</div>; return <><div className="legend"><motion.span initial={reduceMotion ? false : { opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: reduceMotion ? 0 : .22, ease: "easeOut" }}><i className="dot income-dot" /> Income <b>↗</b></motion.span><motion.span initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: reduceMotion ? 0 : .22, delay: reduceMotion ? 0 : .06, ease: "easeOut" }}><i className="dot expense-dot" /> Expenses <b>↘</b></motion.span></div><div className="chart"><div className="y-labels"><span>{money(maximum)}</span><span>{money(maximum * .66)}</span><span>{money(maximum * .33)}</span><span>₹0</span></div><div className="chart-area"><div className="gridline one" /><div className="gridline two" /><div className="gridline three" /><div className="gridline four" /><svg viewBox="0 0 700 220" preserveAspectRatio="none" aria-label="Cash flow chart"><motion.path className="income-line" d={pathFor("income")} initial={reduceMotion ? false : { pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 1 }} transition={{ duration: reduceMotion ? 0 : .35, ease: "easeOut" }} /><motion.path className="expense-line" d={pathFor("expense")} initial={reduceMotion ? false : { pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 1 }} transition={{ duration: reduceMotion ? 0 : .35, delay: reduceMotion ? 0 : .06, ease: "easeOut" }} /></svg><div className="chart-labels">{labels.map((day) => <span key={day}>{new Date(`${selectedMonth}-${String(day).padStart(2, "0")}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>)}</div></div></div></>; }
+
+function InsightBanner({ transactions, totals, onOpen }: { transactions: Transaction[]; totals: { income: number; expense: number }; onOpen: () => void }) { const highest = Object.entries(transactions.filter((transaction) => transaction.type === "expense").reduce<Record<string, number>>((result, transaction) => ({ ...result, [transaction.category]: (result[transaction.category] || 0) + transaction.amount }), {})).sort((a, b) => b[1] - a[1])[0]; return <AnimatedCard className="insight" standalone><span className="insight-spark">✦</span><div><strong>{highest ? `${highest[0]} is your top spending category.` : "No expense insight yet."}</strong><p>{highest ? `${money(highest[1])} recorded in this category from ${transactions.length} transaction${transactions.length === 1 ? "" : "s"}.` : totals.income ? "Add expenses as they occur to see meaningful spending insights." : "Add your first income or expense to begin your monthly record."}</p></div><button onClick={onOpen}>See insights <span>→</span></button></AnimatedCard>; }
 
 function InsightModal({ open, transactions, totals, onClose }: { open: boolean; transactions: Transaction[]; totals: { income: number; expense: number }; onClose: () => void }) {
   const categoryTotals = transactions.filter((t) => t.type === "expense").reduce<Record<string, number>>((summary, transaction) => ({ ...summary, [transaction.category]: (summary[transaction.category] || 0) + transaction.amount }), {});
@@ -362,26 +343,17 @@ function InsightModal({ open, transactions, totals, onClose }: { open: boolean; 
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [email, setEmail] = useState("demo@pocketwise.in");
-  const [password, setPassword] = useState("Pocketwise123");
-  const [error, setError] = useState("");
-
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (email.trim().toLowerCase() === "demo@pocketwise.in" && password === "Pocketwise123") onLogin();
-    else setError("Use the demo credentials shown below to continue.");
-  }
-
-  return <main className="login-shell"><section className="login-visual"><div className="login-brand"><span className="brand-mark">₹</span><span>pocketwise</span></div><div className="login-visual-copy"><p className="eyebrow">YOUR MONEY · YOUR CLARITY</p><h1>A calmer way to see where your money goes.</h1><p>Track income, expenses, budgets, and the small choices that add up.</p></div><div className="login-preview"><div className="preview-top"><span>Net balance</span><b>₹13,23,135</b></div><div className="preview-bars"><i/><i/><i/><i/><i/><i/><i/><i/></div><div className="preview-bottom"><span>Income</span><strong>₹66,200</strong><span>Expenses</span><strong className="preview-expense">₹27,111</strong></div></div></section><section className="login-panel"><div className="login-card"><div className="login-card-head"><p className="eyebrow">WELCOME BACK</p><h2>Sign in to Pocketwise</h2><p>Keep your personal finance picture close.</p></div><form onSubmit={submit} className="login-form"><label>Email address<input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setError(""); }} autoComplete="email" required /></label><label>Password<div className="password-wrap"><input type="password" value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} autoComplete="current-password" required /><span>•••</span></div></label>{error && <p className="login-error">{error}</p>}<button className="primary login-submit" type="submit">Sign in <span>→</span></button></form><div className="demo-credentials"><div><span>DEMO ACCOUNT</span><strong>Ready to explore</strong></div><div className="credential-row"><span>Email</span><b>demo@pocketwise.in</b></div><div className="credential-row"><span>Password</span><b>Pocketwise123</b></div></div><p className="login-footnote">Demo access only · Authentication is temporary for this prototype.</p></div></section></main>;
+  return <main className="login-shell"><section className="login-visual"><div className="login-brand"><span className="brand-mark">₹</span><span>pocketwise</span></div><div className="login-visual-copy"><p className="eyebrow">YOUR MONEY · YOUR CLARITY</p><h1>A calmer way to see where your money goes.</h1><p>Track real income, expenses, imported bank alerts, and monthly reports in one place.</p></div></section><section className="login-panel"><div className="login-card"><div className="login-card-head"><p className="eyebrow">PERSONAL FINANCE</p><h2>Open Finance Dashboard</h2><p>Your dashboard now starts with an empty, live ledger rather than demonstration figures.</p></div><button className="primary login-submit" type="button" onClick={onLogin}>Open dashboard <span>→</span></button><p className="login-footnote">Secure account sign-in is not configured yet. This screen no longer accepts a fake password.</p></div></section></main>;
 }
 
 function CategoryInsightCard({ transactions, onView }: { transactions: Transaction[]; onView: () => void }) { const expenseTotals = transactions.filter((t) => t.type === "expense").reduce<Record<string, number>>((summary, t) => ({ ...summary, [t.category]: (summary[t.category] || 0) + t.amount }), {}); const rows = Object.entries(expenseTotals).sort((a, b) => b[1] - a[1]).slice(0, 3); const highest = rows[0]; return <div className="panel category-insight-panel"><div className="panel-head"><div><h2>Category insights</h2><p>Where your spending is concentrated</p></div><span className="insight-card-icon">↘</span></div>{highest ? <div className="category-lead"><small>Top category</small><strong>{highest[0]}</strong><b>{money(highest[1])}</b></div> : <p className="empty-report">Add expenses to see insights.</p>}<div className="mini-category-list">{rows.map(([category, amount]) => <div key={category}><span>{category}</span><b>{money(amount)}</b></div>)}</div><button className="text-button" onClick={onView}>View full report <span>→</span></button></div>; }
 
-function TransactionRow({ transaction: t, onEdit }: { transaction: Transaction; onEdit?: (transaction: Transaction) => void }) { return <div className="transaction"><div className="transaction-info"><strong>{t.name}</strong><span>{t.category} · {t.date}</span></div><strong className={`amount ${t.type}`}>{t.type === "income" ? "+" : "−"}{money(t.amount)}</strong><button className="edit-button row-edit" onClick={() => onEdit?.(t)} aria-label={`Edit ${t.name}`}>Edit</button></div>; }
+function TransactionRow({ transaction: t, onEdit }: { transaction: Transaction; onEdit?: (transaction: Transaction) => void }) { return <div className="transaction"><div className="transaction-info"><strong>{t.name}</strong><span>{t.category} · {displayDate(t)}</span></div><strong className={`amount ${t.type}`}>{t.type === "income" ? "+" : "−"}{money(t.amount)}</strong><button className="edit-button row-edit" onClick={() => onEdit?.(t)} aria-label={`Edit ${t.name}`}>Edit</button></div>; }
 
-function Transactions({ transactions, selectedMonth, setSelectedMonth, onAdd, onEdit }: { transactions: Transaction[]; selectedMonth: string; setSelectedMonth: (value: string) => void; onAdd: () => void; onEdit: (transaction: Transaction) => void }) {
+function Transactions({ transactions, selectedMonth, setSelectedMonth, onAdd, onEdit, initialKind }: { transactions: Transaction[]; selectedMonth: string; setSelectedMonth: (value: string) => void; onAdd: () => void; onEdit: (transaction: Transaction) => void; initialKind: "all" | "income" | "expense" }) {
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<"all" | "income" | "expense">("all");
+  const [kind, setKind] = useState<"all" | "income" | "expense">(initialKind);
+  useEffect(() => setKind(initialKind), [initialKind]);
   const filtered = transactions.filter((t) => (kind === "all" || t.type === kind) && `${t.name} ${t.category} ${t.source || ""}`.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -389,7 +361,7 @@ function Transactions({ transactions, selectedMonth, setSelectedMonth, onAdd, on
       <PageHeading eyebrow="LEDGER · INR" title="Transactions" description="Every rupee in and out, in one place." action={<div className="heading-actions"><MonthSelect value={selectedMonth} onChange={setSelectedMonth} /><button className="primary" onClick={onAdd}><b>＋</b> Add transaction</button></div>} />
       <AnimatedCard className="panel table-panel" standalone>
         <div className="table-tools"><div className="search-box">⌕<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search transactions" /></div><div className="filter-pills"><button className={`pill ${kind === "all" ? "active" : ""}`} onClick={() => setKind("all")}>All</button><button className={`pill ${kind === "income" ? "active" : ""}`} onClick={() => setKind("income")}>Income</button><button className={`pill ${kind === "expense" ? "active" : ""}`} onClick={() => setKind("expense")}>Expenses</button><span className="selected-month-note">{MONTHS.find((month) => month.value === selectedMonth)?.label}</span></div></div>
-        <div className="transaction-table"><div className="table-row table-header"><span>Transaction</span><span>Category</span><span>Client / source</span><span>Date</span><span>Expenses</span><span>Income</span><span>Action</span></div><AnimatedList>{filtered.map((t) => <AnimatedListItem className="table-row" key={transactionIdentity(t)}><span className="table-name"><strong>{t.name}</strong></span><span>{t.category}</span><span>{t.source || "—"}</span><span>{t.date}</span><span className="table-number expense-cell">{t.type === "expense" ? money(t.amount) : "—"}</span><span className="table-number income-cell">{t.type === "income" ? money(t.amount) : "—"}</span><button className="edit-button" onClick={() => onEdit(t)} aria-label={`Edit ${t.name}`}>Edit</button></AnimatedListItem>)}</AnimatedList></div>
+        <div className="transaction-table"><div className="table-row table-header"><span>Transaction</span><span>Category</span><span>Client / source</span><span>Date</span><span>Expenses</span><span>Income</span><span>Action</span></div>{filtered.length ? <AnimatedList>{filtered.map((t) => <AnimatedListItem className="table-row" key={transactionIdentity(t)}><span className="table-name"><strong>{t.name}</strong></span><span>{t.category}</span><span>{t.source || "—"}</span><span>{displayDate(t)}</span><span className="table-number expense-cell">{t.type === "expense" ? money(t.amount) : "—"}</span><span className="table-number income-cell">{t.type === "income" ? money(t.amount) : "—"}</span><button className="edit-button" onClick={() => onEdit(t)} aria-label={`Edit ${t.name}`}>Edit</button></AnimatedListItem>)}</AnimatedList> : <p className="empty-report">No matching transactions for this month.</p>}</div>
       </AnimatedCard>
       <AnimatedCard className="ledger-note" standalone><span>i</span><div><strong>Showing {MONTHS.find((month) => month.value === selectedMonth)?.label}</strong><p>Income rows retain the client or source that paid you.</p></div></AnimatedCard>
     </>
@@ -413,13 +385,25 @@ function Mail({ messages, status, selectedMonth, setSelectedMonth, onSync }: { m
   );
 }
 
+function downloadReport(transactions: Transaction[], monthLabel: string) {
+  const header = ["Date", "Description", "Type", "Category", "Client or source", "Income INR", "Expense INR"];
+  const escape = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+  const rows = transactions.map((transaction) => [displayDate(transaction), transaction.name, transaction.type, transaction.category, transaction.source || "", transaction.type === "income" ? transaction.amount.toFixed(2) : "", transaction.type === "expense" ? transaction.amount.toFixed(2) : ""]);
+  const csv = [header, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  link.download = `finance-dashboard-${monthLabel.toLowerCase().replaceAll(" ", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function Reports({ transactions, totals, monthLabel, selectedMonth, setSelectedMonth }: { transactions: Transaction[]; totals: { income: number; expense: number }; monthLabel: string; selectedMonth: string; setSelectedMonth: (value: string) => void }) {
   const expensesByCategory = transactions.filter((t) => t.type === "expense").reduce<Record<string, number>>((summary, t) => ({ ...summary, [t.category]: (summary[t.category] || 0) + t.amount }), {});
   const incomeByClient = transactions.filter((t) => t.type === "income").reduce<Record<string, number>>((summary, t) => { const client = t.source || "Unassigned income"; return { ...summary, [client]: (summary[client] || 0) + t.amount }; }, {});
   const expenseRows = Object.entries(expensesByCategory).sort((a, b) => b[1] - a[1]);
   const clientRows = Object.entries(incomeByClient).sort((a, b) => b[1] - a[1]);
-  const savings = Math.max(0, totals.income - totals.expense);
-  const savingsRate = totals.income > 0 ? Math.round((savings / totals.income) * 100) : 0;
+  const netCashFlow = totals.income - totals.expense;
+  const savingsRate = totals.income > 0 ? Math.round((netCashFlow / totals.income) * 100) : 0;
 
   return (
     <>
@@ -428,19 +412,19 @@ function Reports({ transactions, totals, monthLabel, selectedMonth, setSelectedM
       <AnimatedGrid className="report-kpis">
         <AnimatedCard className="panel report-kpi"><span>Total income</span><strong><CountUp value={totals.income} format="currency" decimals={2} /></strong><small className="green-text">Across {clientRows.length} client sources</small></AnimatedCard>
         <AnimatedCard className="panel report-kpi"><span>Total expenses</span><strong><CountUp value={totals.expense} format="currency" decimals={2} /></strong><small className="coral-text">Across {expenseRows.length} categories</small></AnimatedCard>
-        <AnimatedCard className="panel report-kpi"><span>Net savings</span><strong><CountUp value={savings} format="currency" decimals={2} /></strong><small className="green-text"><CountUp value={savingsRate} format="percent" decimals={0} /> of income retained</small></AnimatedCard>
+        <AnimatedCard className="panel report-kpi"><span>Net cash flow</span><strong><CountUp value={netCashFlow} format="currency" decimals={2} /></strong><small className={netCashFlow >= 0 ? "green-text" : "coral-text"}>{totals.income ? <><CountUp value={savingsRate} format="percent" decimals={0} /> of income retained</> : "No income recorded yet"}</small></AnimatedCard>
       </AnimatedGrid>
       <AnimatedGrid className="report-grid">
         <AnimatedCard className="panel category-report"><div className="panel-head"><div><h2>Spending by category</h2><p>Where your expenses are going</p></div></div><div className="category-bars"><AnimatedList>{expenseRows.length ? expenseRows.map(([category, amount]) => <AnimatedListItem className="category-bar" key={category}><div><span>{category}</span><strong><CountUp value={amount} format="currency" decimals={2} /></strong></div><div className="bar-track"><span className="expense-fill" style={{ width: `${Math.max(12, Math.min(100, (amount / Math.max(1, totals.expense)) * 100))}%` }} /></div></AnimatedListItem>) : <p className="empty-report">Add an expense to see category insights.</p>}</AnimatedList></div></AnimatedCard>
         <AnimatedCard className="panel client-report"><div className="panel-head"><div><h2>Income by client</h2><p>Who has paid you so far</p></div></div><div className="client-list"><AnimatedList>{clientRows.length ? clientRows.map(([client, amount], index) => <AnimatedListItem className="client-row" key={client}><span className="client-rank">0{index + 1}</span><span><strong>{client}</strong><small>{transactions.filter((t) => t.type === "income" && (t.source || "Unassigned income") === client).length} income entries</small></span><b><CountUp value={amount} format="currency" decimals={2} /></b></AnimatedListItem>) : <p className="empty-report">Add income with a client or source to see it here.</p>}</AnimatedList></div></AnimatedCard>
       </AnimatedGrid>
       <AnimatedCard className="panel report-notes" standalone><h2>Monthly activity summary</h2><div className="review-item"><span>01</span><div><strong>{transactions.length} transactions recorded</strong><p>{expenseRows.length} expense categories and {clientRows.length} income sources represented in {monthLabel}.</p></div></div><div className="review-item"><span>02</span><div><strong>{expenseRows[0]?.[0] || "Your categories"} is your biggest spend</strong><p>{expenseRows[0] ? `${money(expenseRows[0][1])} so far this month.` : "Add expenses manually or import them from Kotak emails."}</p></div></div><div className="review-item"><span>03</span><div><strong>{clientRows[0]?.[0] || "Your clients"} is your top income source</strong><p>{clientRows[0] ? `${money(clientRows[0][1])} received so far.` : "Record who paid you when adding an income."}</p></div></div></AnimatedCard>
-      <AnimatedCard className="panel export-panel" standalone><div><strong>Need to share this report?</strong><p>Download a clean summary of categories, clients, income, and expenses.</p></div><button className="secondary-action" onClick={() => alert(`Report ready for ${transactions.length} transactions`)}>Export report</button></AnimatedCard>
+      <AnimatedCard className="panel export-panel" standalone><div><strong>Need to share this report?</strong><p>Download a CSV summary of the transactions in this reporting period.</p></div><button className="secondary-action" onClick={() => downloadReport(transactions, monthLabel)} disabled={!transactions.length}>Export CSV</button></AnimatedCard>
     </>
   );
 }
 
-function Settings({ categories, onAddCategory, notify }: { categories: typeof baseCategories; onAddCategory: (event: React.FormEvent<HTMLFormElement>) => void; notify: (message: string) => void }) { return <><PageHeading eyebrow="PREFERENCES" title="Settings" description="Make Pocketwise feel like your money system." /><div className="settings-grid"><div className="panel settings-card"><div className="panel-head"><div><h2>Currency & locale</h2><p>Used across your dashboard and reports</p></div><span className="settings-check">✓</span></div><label>Currency<select defaultValue="INR"><option value="INR">INR · Indian Rupee (₹)</option></select></label><label>Number format<select defaultValue="en-IN"><option value="en-IN">India · 1,23,456.78</option></select></label><button className="secondary-action" onClick={() => notify("Indian rupee format saved")}>Save preferences</button></div><div className="panel settings-card"><div className="panel-head"><div><h2>Categories</h2><p>Organise both expenses and income</p></div><span className="category-count">{categories.length}</span></div><div className="category-settings-list">{categories.map((c) => <div key={c.name}><span><i className={`budget-dot ${c.color}`} />{c.name}</span><small>{c.kind === "income" ? "Income" : "Expense"}</small></div>)}</div><form className="category-form" onSubmit={onAddCategory}><input name="categoryName" placeholder="New category name" required /><select name="categoryKind"><option value="expense">Expense</option><option value="income">Income</option></select><button className="primary" type="submit">Add</button></form></div></div><div className="panel settings-card full-settings"><div className="panel-head"><div><h2>Email import rules</h2><p>Choose what Pocketwise should recognise from your inbox</p></div><span className="settings-check muted-check">✓</span></div><div className="rule-list"><label><input type="checkbox" defaultChecked /> Receipts and card spends</label><label><input type="checkbox" defaultChecked /> Salary and freelance credits</label><label><input type="checkbox" /> Bills and recurring payments</label></div><button className="text-button" onClick={() => notify("Import rules saved")}>Save import rules <span>→</span></button></div></>; }
+function Settings({ categories, onAddCategory, storageStatus }: { categories: Category[]; onAddCategory: (event: React.FormEvent<HTMLFormElement>) => void; storageStatus: string }) { return <><PageHeading eyebrow="PREFERENCES" title="Settings" description="Your fixed finance-dashboard preferences and categories." /><div className="settings-grid"><div className="panel settings-card"><div className="panel-head"><div><h2>Currency & locale</h2><p>Used consistently across your dashboard and reports</p></div><span className="settings-check">✓</span></div><div className="preference-value"><span>Currency</span><strong>INR · Indian Rupee (₹)</strong></div><div className="preference-value"><span>Number format</span><strong>India · 1,23,456.78</strong></div><div className="preference-value"><span>Data status</span><strong>{storageStatus}</strong></div></div><div className="panel settings-card"><div className="panel-head"><div><h2>Categories</h2><p>Organise both expenses and income</p></div><span className="category-count">{categories.length}</span></div><div className="category-settings-list">{categories.length ? categories.map((category) => <div key={category.name}><span><i className={`budget-dot ${category.color}`} />{category.name}</span><small>{category.kind === "income" ? "Income" : "Expense"}</small></div>) : <p className="empty-report">No categories yet. Add one below.</p>}</div><form className="category-form" onSubmit={onAddCategory}><input name="categoryName" placeholder="New category name" required /><select name="categoryKind"><option value="expense">Expense</option><option value="income">Income</option></select><button className="primary" type="submit">Add</button></form></div></div><div className="panel settings-card full-settings"><div className="panel-head"><div><h2>Import behaviour</h2><p>Only transaction-like Kotak debit and credit alerts are imported. Bills, statements, registration alerts, and marketing emails are excluded.</p></div><span className="settings-check">✓</span></div><p className="settings-note">This is enforced by the importer, not by a decorative setting. Review imported mail before relying on it in your ledger.</p></div></>; }
 
 function Connections({ onConnect, onSync, connection }: { onConnect: () => void; onSync: () => void; connection: GmailConnection }) {
   return (
