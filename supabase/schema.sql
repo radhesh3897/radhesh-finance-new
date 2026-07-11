@@ -8,12 +8,15 @@ create table if not exists public.transactions (
   category text not null,
   source text,
   date text not null,
+  month text not null default '2025-06',
   amount numeric(14, 2) not null check (amount >= 0),
   type text not null check (type in ('income', 'expense')),
   icon text not null default '*',
   color text not null default 'peach',
   created_at timestamptz not null default now()
 );
+
+alter table public.transactions add column if not exists month text not null default '2025-06';
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
